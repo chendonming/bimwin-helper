@@ -125,7 +125,7 @@ class BimwinCompletionItemProvider implements CompletionItemProvider {
     return []
   }
   resolveCompletionItem?(item: CompletionItem, token: CancellationToken): ProviderResult<CompletionItem> {
-    throw new Error("Method not implemented.");
+    return null;
   }
 
 }
