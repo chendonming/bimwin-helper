@@ -1,5 +1,7 @@
 import { CancellationToken, CompletionContext, CompletionItem, CompletionItemKind, CompletionItemProvider, CompletionList, Position, ProviderResult, Range, TextDocument } from "vscode";
 
+import { attribute } from './resource/attribute'
+
 export interface TagObject {
   text: string,
   offset: number
@@ -15,6 +17,9 @@ class BimwinCompletionItemProvider implements CompletionItemProvider {
   private size!: number;
   private quotes!: string;
 
+  constructor() {
+    
+  }
 
   getTextBeforePosition(position: Position): string {
     var start = new Position(position.line, 0);
@@ -92,7 +97,7 @@ class BimwinCompletionItemProvider implements CompletionItemProvider {
   // 获取属性值建议
   getAttrSuggestion(tag: string): CompletionItem[] {
     let suggestions: CompletionItem[] | { label: any; kind: CompletionItemKind; }[] = [];
-    const values = ["我是属性", "fuck"];
+    const values = attribute[tag] || [];
     values.forEach((value: any) => {
       suggestions.push({
         label: value,
