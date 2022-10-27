@@ -41,10 +41,10 @@ class BimwinCompletionItemProvider implements CompletionItemProvider {
   }
 
   getPreTag(): TagObject | undefined {
+    console.log('start getPreTag')
     let line = this._position.line;
     let tag: TagObject | string;
     let txt = this.getTextBeforePosition(this._position);
-
     while (this._position.line - line < 10 && line >= 0) {
       if (line !== this._position.line) {
         txt = this._document.lineAt(line).text;
@@ -55,19 +55,69 @@ class BimwinCompletionItemProvider implements CompletionItemProvider {
       if (tag) return <TagObject>tag;
       line--;
     }
+    console.log('start getEndTag')
     return;
   }
 
-  provideCompletionItems(document: TextDocument, position: Position, token: CancellationToken, context: CompletionContext): ProviderResult<CompletionItem[] | CompletionList<CompletionItem>> {
-    console.log('11111111111111')
-    let tag = this.getPreTag();
-    console.log(tag)
-    return [
-      {
-        label: "test",
+  matchAttr(reg: RegExp, txt: string): string {
+    let match: RegExpExecArray;
+    //@ts-ignore
+    match = reg.exec(txt);
+    //@ts-ignore
+    return !/"[^"]*"/.test(txt) && match && match[1];
+  }
+
+  getPreAttr(): string | undefined {
+    let txt = this.getTextBeforePosition(this._position).replace(/"[^'"]*(\s*)[^'"]*$/, '');
+    let end = this._position.character;
+    let start = txt.lastIndexOf(' ', end) + 1;
+    let parsedTxt = this._document.getText(new Range(this._position.line, start, this._position.line, end));
+
+    return this.matchAttr(this.attrReg, parsedTxt);
+  }
+
+  // 获取属性value值建议
+  getAttrValueSuggestion(tag: string, attr: string): CompletionItem[] {
+    let suggestions: CompletionItem[] | { label: any; kind: CompletionItemKind; }[] = [];
+    const values = ["我是属性值", "fuck"];
+    values.forEach((value: any) => {
+      suggestions.push({
+        label: value,
+        kind: CompletionItemKind.Value
+      });
+    });
+    return suggestions;
+  }
+
+  // 获取属性值建议
+  getAttrSuggestion(tag: string): CompletionItem[] {
+    let suggestions: CompletionItem[] | { label: any; kind: CompletionItemKind; }[] = [];
+    const values = ["我是属性", "fuck"];
+    values.forEach((value: any) => {
+      suggestions.push({
+        label: value,
         kind: CompletionItemKind.Property
-      }
-    ]
+      });
+    });
+    return suggestions;
+  }
+
+  provideCompletionItems(document: TextDocument, position: Position, token: CancellationToken, context: CompletionContext): ProviderResult<CompletionItem[] | CompletionList<CompletionItem>> {
+    this._document = document;
+    this._position = position;
+    let tag = this.getPreTag();
+    let attr = this.getPreAttr();
+    console.log("标签查询: ", tag);
+    console.log("属性查询: ", attr);
+
+    if (tag && attr) {
+      return this.getAttrValueSuggestion(tag.text, attr)
+    }
+
+    if (tag) {
+      return this.getAttrSuggestion(tag.text)
+    }
+    return []
   }
   resolveCompletionItem?(item: CompletionItem, token: CancellationToken): ProviderResult<CompletionItem> {
     throw new Error("Method not implemented.");
