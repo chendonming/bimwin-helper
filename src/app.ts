@@ -1,25 +1,27 @@
-import { CancellationToken, CompletionContext, CompletionItem, CompletionItemKind, CompletionItemProvider, CompletionList, Position, ProviderResult, Range, TextDocument } from "vscode";
+import { CancellationToken, CompletionContext, CompletionItem, CompletionItemKind, CompletionItemProvider, CompletionList, Hover, HoverProvider, MarkdownString, Position, ProviderResult, Range, TextDocument } from "vscode";
 
-import { attribute } from './resource/attribute'
+import { attribute, method, hoverDoc } from './resource/intelli';
 
 export interface TagObject {
   text: string,
   offset: number
 };
 
-class BimwinCompletionItemProvider implements CompletionItemProvider {
+export interface Suggestion {
+  [key: string]: any[] | any
+}
+
+export interface RefObject {
+  label: string,
+  tag: string | undefined
+}
+
+class BimwinHoverProvider implements HoverProvider {
+  private matchRefReg: RegExp = /ref\s*=["'](.*?)["']/g;
+  private matchRefObject: RefObject[] = [];
+  private tagReg: RegExp = /<([\w-]+)\s*/g;
   private _document!: TextDocument;
   private _position!: Position;
-  private tagReg: RegExp = /<([\w-]+)\s*/g;
-  private attrReg: RegExp = /(?:\(|\s*)(\w+)=['"][^'"]*/;
-  private tagStartReg: RegExp = /<([\w-]*)$/;
-  private pugTagStartReg: RegExp = /^\s*[\w-]*$/;
-  private size!: number;
-  private quotes!: string;
-
-  constructor() {
-    
-  }
 
   getTextBeforePosition(position: Position): string {
     var start = new Position(position.line, 0);
@@ -45,13 +47,14 @@ class BimwinCompletionItemProvider implements CompletionItemProvider {
     return arr.pop();
   }
 
-  getPreTag(): TagObject | undefined {
-    console.log('start getPreTag')
-    let line = this._position.line;
+  getPreTag(pos?: Position): TagObject | undefined {
+    console.log('查找标签')
+    const position = pos ? pos : this._position
+    let line = position.line;
     let tag: TagObject | string;
-    let txt = this.getTextBeforePosition(this._position);
-    while (this._position.line - line < 10 && line >= 0) {
-      if (line !== this._position.line) {
+    let txt = this.getTextBeforePosition(position);
+    while (position.line - line < 10 && line >= 0) {
+      if (line !== position.line) {
         txt = this._document.lineAt(line).text;
       }
       tag = this.matchTag(this.tagReg, txt, line);
@@ -60,7 +63,112 @@ class BimwinCompletionItemProvider implements CompletionItemProvider {
       if (tag) return <TagObject>tag;
       line--;
     }
-    console.log('start getEndTag')
+    return;
+  }
+
+  // 获取文档中所有的Ref
+  getRefs(): RefObject[] {
+    let m;
+    const arr: RefObject[] = []
+    const txt = this._document.getText()
+    while ((m = this.matchRefReg.exec(txt)) !== null) {
+      const pos: Position = this._document.positionAt(m.index)
+      const preTag = this.getPreTag(pos)
+      arr.push({
+        label: m[1],
+        tag: preTag && preTag.text
+      })
+    }
+
+    if (arr.length !== 0) {
+      this.matchRefObject = arr;
+    }
+    return arr;
+  }
+
+  // 是否需要hover提供文档
+  isNeedHover() {
+    this.getRefs()
+    const findRes = this.matchRefObject.find(v => v.tag === 'pit-bim-win-ui')
+    if (findRes) {
+      let reg = new RegExp('refs\\.' + findRes.label + '\\.(.*?)\W*$')
+      if (reg.test(this.getTextBeforePosition(this._position))) {
+        return true
+      }
+    }
+
+    return false
+  }
+
+  provideHover(document: TextDocument, position: Position, token: CancellationToken): ProviderResult<Hover> {
+    this._document = document;
+    this._position = position;
+    const isHover = this.isNeedHover()
+    if (isHover) {
+      const range = document.getWordRangeAtPosition(position);
+      const word = document.getText(range);
+      if (hoverDoc[word]) {
+        const md = new MarkdownString()
+        md.value = hoverDoc[word]
+        return new Hover(md)
+      }
+    }
+    return null
+  }
+}
+
+class BimwinCompletionItemProvider implements CompletionItemProvider {
+  private _document!: TextDocument;
+  private _position!: Position;
+  private tagReg: RegExp = /<([\w-]+)\s*/g;
+  private attrReg: RegExp = /(?:\(|\s*)(\w+)=['"][^'"]*/;
+  private tagStartReg: RegExp = /<([\w-]*)$/;
+  private pugTagStartReg: RegExp = /^\s*[\w-]*$/;
+  private size!: number;
+  private quotes!: string;
+  private matchRefReg: RegExp = /ref\s*=["'](.*?)["']/g;
+  private matchRefObject: RefObject[] = [];
+
+  getTextBeforePosition(position: Position): string {
+    var start = new Position(position.line, 0);
+    var range = new Range(start, position);
+    return this._document.getText(range);
+  }
+
+  matchTag(reg: RegExp, txt: string, line: number): TagObject | string {
+    let match: RegExpExecArray;
+    let arr: TagObject[] = [];
+
+    if (/<\/?[-\w]+[^<>]*>[\s\w]*<?\s*[\w-]*$/.test(txt) || (this._position.line === line && (/^\s*[^<]+\s*>[^<\/>]*$/.test(txt) || /[^<>]*<$/.test(txt[txt.length - 1])))) {
+      return 'break';
+    }
+    //@ts-ignore
+    while ((match = reg.exec(txt))) {
+      arr.push({
+        text: match[1],
+        offset: this._document.offsetAt(new Position(line, match.index))
+      });
+    }
+    //@ts-ignore
+    return arr.pop();
+  }
+
+  getPreTag(pos?: Position): TagObject | undefined {
+    console.log('查找标签')
+    const position = pos ? pos : this._position
+    let line = position.line;
+    let tag: TagObject | string;
+    let txt = this.getTextBeforePosition(position);
+    while (position.line - line < 10 && line >= 0) {
+      if (line !== position.line) {
+        txt = this._document.lineAt(line).text;
+      }
+      tag = this.matchTag(this.tagReg, txt, line);
+
+      if (tag === 'break') return;
+      if (tag) return <TagObject>tag;
+      line--;
+    }
     return;
   }
 
@@ -80,6 +188,57 @@ class BimwinCompletionItemProvider implements CompletionItemProvider {
 
     return this.matchAttr(this.attrReg, parsedTxt);
   }
+
+  // 是否需要提供Ref
+  isNeedRef(pos?: Position): boolean {
+    let txt = this.getTextBeforePosition(pos || this._position);
+    if (/\$refs\.?$/.test(txt)) {
+      return true;
+    }
+
+    // 有一种可能: 被换行了
+    if (/\s+\.$/.test(txt)) {
+      const line = this._document.lineAt(this._position.line - 1)
+      return this.isNeedRef(line.range.end)
+    }
+    return false;
+  }
+
+  // 获取文档中所有的Ref
+  getRefs(): RefObject[] {
+    let m;
+    const arr: RefObject[] = []
+    const txt = this._document.getText()
+    while ((m = this.matchRefReg.exec(txt)) !== null) {
+      const pos: Position = this._document.positionAt(m.index)
+      const preTag = this.getPreTag(pos)
+      arr.push({
+        label: m[1],
+        tag: preTag && preTag.text
+      })
+    }
+
+    if (arr.length !== 0) {
+      this.matchRefObject = arr;
+    }
+    return arr;
+  }
+
+  // 是否需要提供Ref Method
+  isNeedRefMethod(): boolean {
+    if (this.matchRefObject.length === 0) {
+      this.getRefs()
+    }
+    const findRes = this.matchRefObject.find(v => v.tag === 'pit-bim-win-ui')
+    if (findRes) {
+      let reg = new RegExp('refs\.' + findRes.label + '\.$')
+      if (reg.test(this.getTextBeforePosition(this._position))) {
+        return true
+      }
+    }
+    return false
+  }
+
 
   // 获取属性value值建议
   getAttrValueSuggestion(tag: string, attr: string): CompletionItem[] {
@@ -112,14 +271,28 @@ class BimwinCompletionItemProvider implements CompletionItemProvider {
     this._position = position;
     let tag = this.getPreTag();
     let attr = this.getPreAttr();
-    console.log("标签查询: ", tag);
-    console.log("属性查询: ", attr);
 
-    if (tag && attr) {
-      return this.getAttrValueSuggestion(tag.text, attr)
+    let needRef = this.isNeedRef()
+    let needRefMethod = this.isNeedRefMethod()
+
+    if (needRef) {
+      return this.getRefs().map(v => ({
+        label: v.label,
+        kind: CompletionItemKind.Property
+      }))
     }
 
-    if (tag) {
+    if (needRefMethod) {
+      return method['pit-bim-win-ui'].map((v: { label: any; description: any; }) => ({
+        label: {
+          label: v.label,
+          description: v.description
+        },
+        kind: CompletionItemKind.Method
+      }))
+    }
+
+    if (tag && !attr) {
       return this.getAttrSuggestion(tag.text)
     }
     return []
@@ -130,4 +303,4 @@ class BimwinCompletionItemProvider implements CompletionItemProvider {
 
 }
 
-export { BimwinCompletionItemProvider }
+export { BimwinCompletionItemProvider, BimwinHoverProvider };
